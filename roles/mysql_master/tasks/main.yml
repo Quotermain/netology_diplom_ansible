@@ -1,0 +1,111 @@
+---
+- name: Upload deb file with dependencies
+  copy:
+    src: "libaio_deb"
+    dest: "/tmp/libaio_deb"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Install a .deb package
+  ansible.builtin.apt:
+    deb: /tmp/libaio_deb
+
+- name: Upload .tar file containing binaries from local storage
+  copy:
+    src: "{{ mysql_distr }}"
+    dest: "/tmp/{{ mysql_distr }}"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Add group "mysql"
+  ansible.builtin.group:
+    name: mysql
+
+- name: Add "mysql" user to the group "mysql"
+  user:
+    name: mysql
+    shell: /bin/false
+    group: mysql
+
+- name: Ensure installation dir exists
+  file:
+    state: directory
+    path: "{{ unpack_dir }}"
+    mode: 0755
+
+- name: Untar the archive with binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ mysql_distr }}"
+    dest: "{{ unpack_dir }}"
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+
+- name: Create a symbolic link
+  ansible.builtin.file:
+    src: /usr/local/mysql-ubuntu20.04/
+    dest: /usr/local/mysql
+    state: link
+
+- name: Create dir for some system vars
+  file:
+    state: directory
+    path: /usr/local/mysql/mysql-files
+    mode: 0750
+    owner: mysql
+    group: mysql
+
+- name: Initialization
+  shell: "/usr/local/mysql/bin/mysqld --initialize-insecure --user=mysql --bind-address=* --server-id=1"
+
+- name: Ssl and rsa setup
+  shell: "/usr/local/mysql/bin/mysql_ssl_rsa_setup"
+
+- name: Safe launch
+  shell: "/usr/local/mysql/bin/mysqld_safe --user=mysql &"
+
+- name: Upload deb file with dependencies
+  copy:
+    src: "libtinfo5_2.deb"
+    dest: "/tmp/libtinfo5_2.deb"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Install a .deb package
+  ansible.builtin.apt:
+    deb: /tmp/libtinfo5_2.deb
+
+- name: Create "wordpress" db
+  shell: /usr/local/mysql/bin/mysql -u root -e "CREATE DATABASE wordpress;"
+
+- name: Create user "wordpress"
+  shell: /usr/local/mysql/bin/mysql -u root -e "CREATE USER 'wordpress'@'%' IDENTIFIED BY 'wordpress';"
+
+- name: Grant all to the user "wordpress" on the DB "wordpress"
+  shell: /usr/local/mysql/bin/mysql -u root -e "GRANT ALL PRIVILEGES ON wordpress.* TO 'wordpress'@'%';"
+
+- name: Create a new user for slave
+  shell: /usr/local/mysql/bin/mysql -u root -e "CREATE USER 'slave'@'192.168.10.12' IDENTIFIED WITH mysql_native_password BY 'slave';"
+
+- name: Grant privs to slave
+  shell: /usr/local/mysql/bin/mysql -u root -e "GRANT REPLICATION SLAVE ON *.* TO 'slave'@'192.168.10.12';"
+
+- name: Flush privs
+  shell: /usr/local/mysql/bin/mysql -u root -e "FLUSH PRIVILEGES;"
+
+- name: Add some constraints
+  shell: /usr/local/mysql/bin/mysql -u root -e "FLUSH TABLES WITH READ LOCK;"
+
+- name: Dumping the current state of all databases
+  shell: /usr/local/mysql/bin/mysqldump -u root --all-databases --master-data > /usr/local/mysql/data/backup.sql
+
+- name: Copy backup to the managing host
+  ansible.builtin.fetch:
+    src: /usr/local/mysql/data/backup.sql
+    dest: /tmp/
+    flat: yes
+
+- name: Unlocking tables
+  shell: /usr/local/mysql/bin/mysql -u root -e "UNLOCK TABLES;"

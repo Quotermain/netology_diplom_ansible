@@ -1,0 +1,95 @@
+---
+- name: Upload deb file with dependencies
+  copy:
+    src: "libaio_deb"
+    dest: "/tmp/libaio_deb"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Install a .deb package
+  ansible.builtin.apt:
+    deb: /tmp/libaio_deb
+
+- name: Upload .tar file containing binaries from local storage
+  copy:
+    src: "{{ mysql_distr }}"
+    dest: "/tmp/{{ mysql_distr }}"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Add group "mysql"
+  ansible.builtin.group:
+    name: mysql
+
+- name: Add "mysql" user to the group "mysql"
+  user:
+    name: mysql
+    shell: /bin/false
+    group: mysql
+
+- name: Ensure installation dir exists
+  file:
+    state: directory
+    path: "{{ unpack_dir }}"
+    mode: 0755
+
+- name: Untar the archive with binaries
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ mysql_distr }}"
+    dest: "{{ unpack_dir }}"
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+
+- name: Create a symbolic link
+  ansible.builtin.file:
+    src: /usr/local/mysql-ubuntu20.04/
+    dest: /usr/local/mysql
+    state: link
+
+- name: Create dir for some system vars
+  file:
+    state: directory
+    path: /usr/local/mysql/mysql-files
+    mode: 0750
+    owner: mysql
+    group: mysql
+
+- name: Initialization
+  shell: "/usr/local/mysql/bin/mysqld --initialize-insecure --user=mysql --bind-address=*"
+
+- name: Ssl and rsa setup
+  shell: "/usr/local/mysql/bin/mysql_ssl_rsa_setup"
+
+- name: Safe launch
+  shell: "/usr/local/mysql/bin/mysqld_safe --user=mysql &"
+
+- name: Upload deb file with dependencies
+  copy:
+    src: "libtinfo5_2.deb"
+    dest: "/tmp/libtinfo5_2.deb"
+    mode: 0755
+  register: mysql_uploaded
+  until: mysql_uploaded is succeeded
+
+- name: Install a .deb package
+  ansible.builtin.apt:
+    deb: /tmp/libtinfo5_2.deb
+
+- name: Copy backup from managing host to slave
+  copy:
+    src: /tmp/backup.sql
+    dest: /tmp/backup.sql
+    mode: 0755
+  register: backup_uploaded
+  until: backup_uploaded is succeeded
+
+- name: Change server id
+  shell: /usr/local/mysql/bin/mysql -u root -e "set global server_id=2;"
+
+- name: Specify master node
+  shell: /usr/local/mysql/bin/mysql -u root -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='192.168.10.11', SOURCE_USER='slave',SOURCE_PASSWORD='slave',SOURCE_LOG_FILE='binlog.000002', SOURCE_LOG_POS=4;"
+
+- name: Start replication
+  shell: /usr/local/mysql/bin/mysql -u root -e "START REPLICA;"

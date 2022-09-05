@@ -1,0 +1,30 @@
+---
+- hosts: proxy_nginx
+  roles:
+   - nginx
+  become: true
+
+- hosts: mysql_master
+  roles:
+    - mysql_master
+  become: true
+
+- hosts: mysql_slave
+  roles:
+    - mysql_slave
+  become: true
+
+- hosts: wordpress
+  roles:
+    - wordpress
+  become: true
+
+- hosts: gitlab
+  roles:
+    - gitlab
+  become: true
+
+- hosts: monitoring
+  roles:
+    - monitoring
+  become: true
